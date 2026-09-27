@@ -20,6 +20,13 @@ struct ExamRangeSettingsView: View {
     /// Shift-클릭으로 구간을 고를 때 기준이 되는 책 쪽수
     @State private var anchorBookPage: Int?
     @State private var thumbnails = ThumbnailCache()
+    /// 마우스가 올라가 있는 썸네일의 PDF 페이지
+    @State private var hoveredPDFPage: Int?
+    /// 마지막으로 클릭했거나 미리보기로 본 PDF 페이지
+    @State private var currentPDFPage: Int?
+    /// 크게 보고 있는 PDF 페이지. `nil`이면 미리보기가 닫혀 있어요.
+    @State private var previewPDFPage: Int?
+    @FocusState private var isGridFocused: Bool
 
     private var bookBounds: ClosedRange<Int> {
         Textbook.bookPageBounds(pageCount: textbook.pageCount, bookPageOneAt: bookPageOneAt)
@@ -35,7 +42,21 @@ struct ExamRangeSettingsView: View {
             footer
                 .padding()
         }
-        .frame(minWidth: 760, idealWidth: 860, minHeight: 620, idealHeight: 760)
+        .overlay {
+            if let previewPDFPage {
+                PagePreview(
+                    document: document,
+                    pdfPage: previewPDFPage,
+                    bookPage: Textbook.bookPage(forPDFPage: previewPDFPage, bookPageOneAt: bookPageOneAt),
+                    isSelected: isSelected(pdfPage: previewPDFPage),
+                    onMove: movePreview(by:),
+                    onToggle: { togglePreviewedPage() },
+                    onClose: { self.previewPDFPage = nil }
+                )
+            }
+        }
+        .frame(minWidth: 760, idealWidth: 960, minHeight: 620, idealHeight: 860)
+        .defaultFocus($isGridFocused, true)
         .onAppear {
             bookPageOneAt = textbook.bookPageOneAt
             rangeText = PageRangeFormat.format(textbook.examBookPages)
@@ -101,6 +122,10 @@ struct ExamRangeSettingsView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
+
+            Label("썸네일에 마우스를 올리고 스페이스바를 누르면 크게 볼 수 있어요.", systemImage: "keyboard")
+                .font(.callout)
+                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -119,10 +144,20 @@ struct ExamRangeSettingsView: View {
                             pdfPage: pdfPage,
                             bookPage: bookPage,
                             isSelected: bookPage.map { selected.contains($0) } ?? false,
+                            isHovered: hoveredPDFPage == pdfPage,
                             cache: thumbnails
                         )
                         .onTapGesture {
+                            isGridFocused = true
+                            currentPDFPage = pdfPage
                             if let bookPage { toggle(bookPage) }
+                        }
+                        .onHover { isInside in
+                            if isInside {
+                                hoveredPDFPage = pdfPage
+                            } else if hoveredPDFPage == pdfPage {
+                                hoveredPDFPage = nil
+                            }
                         }
                         .contextMenu {
                             Button("이 페이지를 책 1쪽으로") { bookPageOneAt = pdfPage }
@@ -132,9 +167,21 @@ struct ExamRangeSettingsView: View {
                 }
                 .padding()
             }
+            .focusable()
+            .focused($isGridFocused)
+            .focusEffectDisabled()
+            .onKeyPress(keys: [.space, .escape, .leftArrow, .rightArrow, .return]) { press in
+                handleKey(press.key)
+            }
             .onAppear {
                 if let first = textbook.examPDFPages.first {
                     proxy.scrollTo(first, anchor: .top)
+                }
+            }
+            .onChange(of: previewPDFPage) {
+                // 미리보기에서 넘긴 페이지가 닫았을 때 보이도록 뒤에서 따라가요.
+                if let previewPDFPage {
+                    proxy.scrollTo(previewPDFPage, anchor: .center)
                 }
             }
         }
@@ -148,10 +195,11 @@ struct ExamRangeSettingsView: View {
             Button("모두 해제") { rangeText = "" }
                 .disabled(selectedBookPages.isEmpty && parseError == nil)
             Spacer()
+            // 미리보기 중에는 Esc·Return을 미리보기가 써야 해서 단축키를 잠시 꺼 둬요.
             Button("취소", role: .cancel) { dismiss() }
-                .keyboardShortcut(.cancelAction)
+                .keyboardShortcut(previewPDFPage == nil ? KeyboardShortcut.cancelAction : nil)
             Button("저장") { save() }
-                .keyboardShortcut(.defaultAction)
+                .keyboardShortcut(previewPDFPage == nil ? KeyboardShortcut.defaultAction : nil)
                 .disabled(parseError != nil)
         }
     }
@@ -180,6 +228,46 @@ struct ExamRangeSettingsView: View {
         rangeText = PageRangeFormat.format(Array(pages))
     }
 
+    private func isSelected(pdfPage: Int) -> Bool {
+        guard let bookPage = Textbook.bookPage(forPDFPage: pdfPage, bookPageOneAt: bookPageOneAt) else { return false }
+        return selectedBookPages.contains(bookPage)
+    }
+
+    private func handleKey(_ key: KeyEquivalent) -> KeyPress.Result {
+        guard previewPDFPage != nil else {
+            guard key == .space, let target = hoveredPDFPage ?? currentPDFPage ?? textbook.examPDFPages.first else {
+                return .ignored
+            }
+            previewPDFPage = target
+            currentPDFPage = target
+            return .handled
+        }
+        switch key {
+        case .space, .escape: previewPDFPage = nil
+        case .leftArrow: movePreview(by: -1)
+        case .rightArrow: movePreview(by: 1)
+        case .return: togglePreviewedPage()
+        default: return .ignored
+        }
+        return .handled
+    }
+
+    private func movePreview(by offset: Int) {
+        guard let previewPDFPage else { return }
+        let next = min(max(1, previewPDFPage + offset), textbook.pageCount)
+        self.previewPDFPage = next
+        currentPDFPage = next
+        // 뒤에서 스크롤이 따라가면 마우스 아래 썸네일이 바뀌므로, 닫은 뒤에는 방금 본 페이지를 기준으로 해요.
+        hoveredPDFPage = nil
+    }
+
+    private func togglePreviewedPage() {
+        guard let previewPDFPage,
+              let bookPage = Textbook.bookPage(forPDFPage: previewPDFPage, bookPageOneAt: bookPageOneAt)
+        else { return }
+        toggle(bookPage)
+    }
+
     private func save() {
         textbook.bookPageOneAt = bookPageOneAt
         textbook.examPDFPages = selectedBookPages
@@ -197,6 +285,7 @@ private struct PageCell: View {
     let pdfPage: Int
     let bookPage: Int?
     let isSelected: Bool
+    let isHovered: Bool
     let cache: ThumbnailCache
 
     @State private var image: NSImage?
@@ -219,6 +308,12 @@ private struct PageCell: View {
                     RoundedRectangle(cornerRadius: 4)
                         .strokeBorder(isSelected ? AnyShapeStyle(.tint) : AnyShapeStyle(.separator),
                                       lineWidth: isSelected ? 3 : 1)
+                }
+                .overlay {
+                    if isHovered && !isSelected {
+                        RoundedRectangle(cornerRadius: 4)
+                            .strokeBorder(.secondary, lineWidth: 2)
+                    }
                 }
 
                 if isSelected {

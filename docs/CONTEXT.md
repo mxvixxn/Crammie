@@ -87,10 +87,11 @@ PDF 불러오기 → 설정에서 시험 범위 페이지 지정
 | `Views/LibraryView.swift` | 교재 목록. 드래그 앤 드롭 / ⌘O 파일 열기(여러 개 가능) / 오른쪽 클릭 삭제 |
 | `Views/TextbookDetailView.swift` | PDF 미리보기. "전체 / 시험 범위만" 전환 |
 | `Views/ExamRangeSettingsView.swift` | 시험 범위 설정 시트. 입력칸 ↔ 썸네일 양방향 연동, Shift-클릭 구간 선택 |
+| `Views/PagePreview.swift` | 썸네일에 마우스를 올리고 **스페이스바** → 한 페이지 크게 보기. ←/→ 넘기기, Return 선택/해제, 스페이스·Esc 닫기, 핀치 확대 |
 
 - 샌드박스: `ENABLE_USER_SELECTED_FILES = readonly` (고른 파일 읽기만). 네트워크 권한은 AI 기능 때 추가
 - 암호 걸린 PDF는 거절하고 안내
-- **맥에서 빌드 검증 필요** — 리눅스 컨테이너에서 작성해 컴파일해 보지 못함
+- ✅ 맥에서 빌드·실행 확인 (2026-09-27). 스페이스바 미리보기는 추가 후 아직 확인 전
 - 서명: Xcode에서 Signing & Capabilities → Team을 Personal Team으로 지정해야 함 (`DEVELOPMENT_TEAM` 비워 둠)
 - 번들 ID 임시값: `com.mxvixxn.Crammie`
 
